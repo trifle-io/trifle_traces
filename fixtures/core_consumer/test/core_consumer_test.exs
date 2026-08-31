@@ -8,6 +8,7 @@ defmodule TrifleTracesCoreConsumerTest do
            end) == :ok
 
     refute Code.ensure_loaded?(Mongo)
+    refute Code.ensure_loaded?(Postgrex)
     refute Code.ensure_loaded?(Plug.Conn)
     refute Code.ensure_loaded?(Oban.Job)
     refute Code.ensure_loaded?(ExAws)

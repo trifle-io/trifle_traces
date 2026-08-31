@@ -33,6 +33,7 @@ defmodule Trifle.Traces.MixProject do
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.2"},
       {:mongodb_driver, "~> 1.2.0", optional: true},
+      {:postgrex, "~> 0.17", optional: true},
       {:ex_aws, "~> 2.5", optional: true},
       {:ex_aws_s3, "~> 2.5", optional: true},
       {:hackney, "~> 4.0", optional: true},
@@ -59,7 +60,7 @@ defmodule Trifle.Traces.MixProject do
     [
       main: "Trifle.Traces",
       source_ref: "v#{@version}",
-      extras: ["README.md"]
+      extras: ["README.md", "CHANGELOG.md", "RELEASING.md"]
     ]
   end
 end

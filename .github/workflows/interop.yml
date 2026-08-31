@@ -14,6 +14,22 @@ permissions:
 jobs:
   fixtures:
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/trifle_traces_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trifle_traces_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d trifle_traces_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout Elixir implementation
         uses: actions/checkout@v4
@@ -52,3 +68,18 @@ jobs:
           ruby interop/ruby_file_reader.rb ../trifle-traces /tmp/trifle-interop/elixir
           ruby interop/ruby_file_writer.rb ../trifle-traces /tmp/trifle-interop/ruby
           mix run interop/elixir_file_reader.exs /tmp/trifle-interop/ruby
+      - name: Write PostgreSQL metadata with Ruby
+        working-directory: trifle-traces
+        run: >-
+          bundle exec ruby ../trifle_traces/interop/ruby_postgres_writer.rb
+          . "$POSTGRES_URL" trifle_traces_interop
+      - name: Read Ruby and write Elixir PostgreSQL metadata
+        working-directory: trifle_traces
+        run: >-
+          mix run interop/elixir_postgres_reader_writer.exs
+          "$POSTGRES_URL" trifle_traces_interop
+      - name: Read PostgreSQL metadata with Ruby
+        working-directory: trifle-traces
+        run: >-
+          bundle exec ruby ../trifle_traces/interop/ruby_postgres_reader.rb
+          . "$POSTGRES_URL" trifle_traces_interop

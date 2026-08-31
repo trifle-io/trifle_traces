@@ -9,7 +9,8 @@ drivers.
 
 This repository is the Elixir counterpart of
 [Trifle::Traces](https://github.com/trifle-io/trifle-traces). Version 2.0 uses
-the same Mongo documents and File/S3 payload format in both languages.
+the same PostgreSQL schema, Mongo documents, and File/S3 payload format in both
+languages.
 
 > **Release candidate:** `2.0.0-rc.1` is prepared for Git installation and
 > coordinated compatibility testing. It is not published on Hex.
@@ -31,6 +32,7 @@ end
 Add only the optional clients used by your application. For example:
 
 ```elixir
+{:postgrex, "~> 0.17"}
 {:mongodb_driver, "~> 1.2"}
 {:ex_aws, "~> 2.5"}
 {:ex_aws_s3, "~> 2.5"}
@@ -65,11 +67,9 @@ active: the function still runs and its result is returned.
 ## Configuration
 
 ```elixir
-{:ok, mongo} = Mongo.start_link(url: "mongodb://localhost:27017/trifle")
-
 config =
   Trifle.Traces.configure(
-    index_driver: Trifle.Traces.Driver.Index.Mongo.new(mongo),
+    index_driver: Trifle.Traces.Driver.Index.Postgres.new(MyApp.Repo),
     data_driver: Trifle.Traces.Driver.Data.S3.new(
       buckets: ["traces-a", "traces-b"],
       prefix: "traces",
@@ -89,13 +89,19 @@ config =
 Run driver setup explicitly during provisioning:
 
 ```elixir
-Trifle.Traces.Driver.Index.Mongo.setup!(mongo)
+Trifle.Traces.Driver.Index.Postgres.setup!(MyApp.Repo)
 
 Trifle.Traces.Driver.Data.S3.setup!(
   buckets: ["traces-a", "traces-b"],
   retentions: [3, 7, 30, 90]
 )
+
+# Run periodically from Oban or another scheduler:
+Trifle.Traces.Driver.Index.Postgres.cleanup!(MyApp.Repo)
 ```
+
+The Postgres driver accepts either a Postgrex connection or an Ecto Repo that
+exports `query!/3`. Passing the application Repo reuses its existing pool.
 
 ## Current tracer and Tasks
 
@@ -130,9 +136,9 @@ Trifle.Traces.with_tracer("jobs/high-volume", [mode: :deferred], fn ->
 end)
 ```
 
-Available index drivers: Mongo, Memory, and Null. Available data drivers: S3,
-File, Memory, and Null. Database and object-storage clients are optional and
-injected by the host application.
+Available index drivers: Postgres, Mongo, Memory, and Null. Available data
+drivers: S3, File, Memory, and Null. Database and object-storage clients are
+optional and injected by the host application.
 
 ## Reading persisted traces
 
