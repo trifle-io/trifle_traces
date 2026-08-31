@@ -1,0 +1,54 @@
+name: Ruby and Elixir interoperability
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruby_ref:
+        description: trifle-io/trifle-traces Git ref paired with this Elixir revision
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Elixir implementation
+        uses: actions/checkout@v4
+        with:
+          path: trifle_traces
+      - name: Checkout Ruby implementation
+        uses: actions/checkout@v4
+        with:
+          repository: trifle-io/trifle-traces
+          ref: ${{ inputs.ruby_ref }}
+          path: trifle-traces
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.4"
+          otp-version: "28.0"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.1"
+          bundler-cache: false
+      - name: Install Ruby dependencies
+        working-directory: trifle-traces
+        run: bundle install
+      - name: Validate Ruby fixture with Elixir
+        working-directory: trifle_traces
+        run: |
+          mix deps.get
+          mix test test/trifle/traces/interop_fixture_test.exs
+      - name: Validate Ruby baseline
+        working-directory: trifle-traces
+        run: bundle exec rspec
+      - name: Verify File payloads in both directions
+        run: |
+          mkdir -p /tmp/trifle-interop/elixir /tmp/trifle-interop/ruby
+          cd trifle_traces
+          mix run interop/elixir_file_writer.exs /tmp/trifle-interop/elixir
+          ruby interop/ruby_file_reader.rb ../trifle-traces /tmp/trifle-interop/elixir
+          ruby interop/ruby_file_writer.rb ../trifle-traces /tmp/trifle-interop/ruby
+          mix run interop/elixir_file_reader.exs /tmp/trifle-interop/ruby
