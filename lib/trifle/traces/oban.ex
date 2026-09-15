@@ -4,6 +4,10 @@ defmodule Trifle.Traces.Oban do
 
   Add `{Trifle.Traces.Oban, options}` to the host supervision tree. All jobs
   are traced by default; pass `selector: fn job -> ... end` to opt out.
+
+  Job arguments are stored directly in `meta`, matching the Ruby integrations.
+  Job ID, queue, worker and attempt are stored in `context`. Configured context
+  is merged with these defaults and takes precedence on matching keys.
   """
 
   use GenServer
@@ -37,6 +41,7 @@ defmodule Trifle.Traces.Oban do
         |> Keyword.get(:config, Trifle.Traces.configuration())
         |> resolve(job)
         |> normalize_config()
+        |> with_job_context(job)
 
       key = options |> Keyword.get(:key, &default_key/1) |> resolve(job)
       meta = options |> Keyword.get(:meta, &default_meta/1) |> resolve(job)
@@ -99,8 +104,17 @@ defmodule Trifle.Traces.Oban do
     "jobs/#{worker}"
   end
 
-  defp default_meta(job) do
-    Map.new([:id, :queue, :worker, :attempt, :args], fn key -> {key, field(job, key)} end)
+  defp default_meta(job), do: field(job, :args)
+
+  defp with_job_context(config, job) do
+    job_context = Map.new([:id, :queue, :worker, :attempt], fn key -> {key, field(job, key)} end)
+
+    %{
+      config
+      | context: fn tracer ->
+          Map.merge(job_context, Configuration.context_for(config, tracer))
+        end
+    }
   end
 
   defp field(job, key), do: Map.get(job, key, Map.get(job, to_string(key)))

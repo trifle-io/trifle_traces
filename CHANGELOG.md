@@ -10,3 +10,5 @@
   indexed search, deterministic pagination, and scheduled retention cleanup.
 - Ruby-compatible records, payload parts, search filters, cursors, retention, and counters.
 - Phoenix, generic Plug, and Oban lifecycle integrations.
+- Oban stores job arguments directly in `meta` (arrays or maps), matching Ruby
+  integrations. Job ID, queue, worker and attempt live in `context`.

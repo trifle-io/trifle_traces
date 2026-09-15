@@ -76,8 +76,81 @@ defmodule Trifle.Traces.IntegrationsTest do
     assert Trifle.Traces.current_tracer() == nil
     assert_receive {:trace, snapshot}
     assert snapshot.key == "jobs/MyApp.SyncWorker"
-    assert snapshot.meta.id == 10
+    assert snapshot.meta == job.args
+    assert Configuration.context_for(snapshot.config, snapshot) == Map.drop(job, [:args])
     assert snapshot.state == :error
+  end
+
+  test "Oban persists arguments directly as an array or map, with job details in context" do
+    for arguments <- [
+          [42, false, nil, %{"region" => "eu"}],
+          %{
+            "args" => "an actual argument named args",
+            "nested" => [%{"values" => [0, false, nil]}]
+          },
+          %{"large" => String.duplicate("東京", 500)},
+          [],
+          %{}
+        ] do
+      config = Configuration.new(index_driver: Trifle.Traces.Driver.Index.Memory.new())
+
+      job = %{
+        "id" => 10,
+        "queue" => "default",
+        "worker" => "MyApp.SyncWorker",
+        "attempt" => 2,
+        "args" => arguments
+      }
+
+      options = [config: config]
+
+      Trifle.Traces.Oban.handle_event([:oban, :job, :start], %{}, %{job: job}, options)
+      reference = Trifle.Traces.Tracer.snapshot(Trifle.Traces.current_tracer()).reference
+
+      Trifle.Traces.Oban.handle_event(
+        [:oban, :job, :stop],
+        %{},
+        %{job: job, state: :success},
+        options
+      )
+
+      record = Trifle.Traces.find(reference, config: config)
+      assert record.meta == arguments
+      assert record.context == %{id: 10, queue: "default", worker: "MyApp.SyncWorker", attempt: 2}
+    end
+  end
+
+  test "Oban preserves configured context and argument transformation callbacks" do
+    for context <- [
+          %{queue: "custom", source: "app"},
+          fn tracer -> %{queue: "custom", arguments: tracer.meta} end
+        ] do
+      config =
+        Configuration.new(index_driver: Trifle.Traces.Driver.Index.Memory.new(), context: context)
+
+      job = %{
+        id: 11,
+        queue: "default",
+        worker: "MyApp.Worker",
+        attempt: 1,
+        args: %{"token" => "secret", "id" => 42}
+      }
+
+      options = [config: config, meta: fn job -> Map.take(job.args, ["id"]) end]
+
+      Trifle.Traces.Oban.handle_event([:oban, :job, :start], %{}, %{job: job}, options)
+      reference = Trifle.Traces.Tracer.snapshot(Trifle.Traces.current_tracer()).reference
+      Trifle.Traces.Oban.handle_event([:oban, :job, :stop], %{}, %{job: job}, options)
+
+      record = Trifle.Traces.find(reference, config: config)
+      assert record.meta == %{"id" => 42}
+      assert record.context.queue == "custom"
+      assert record.context.worker == job.worker
+
+      if is_function(context),
+        do: assert(record.context.arguments == record.meta),
+        else: assert(record.context.source == "app")
+    end
   end
 
   test "selectors skip Phoenix requests and Oban jobs" do

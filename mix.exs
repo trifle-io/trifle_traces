@@ -36,7 +36,7 @@ defmodule Trifle.Traces.MixProject do
       {:postgrex, "~> 0.17", optional: true},
       {:ex_aws, "~> 2.5", optional: true},
       {:ex_aws_s3, "~> 2.5", optional: true},
-      {:hackney, "~> 4.0", optional: true},
+      {:hackney, ">= 1.20.0", optional: true},
       {:sweet_xml, "~> 0.7", optional: true},
       {:plug, "~> 1.14", optional: true},
       {:oban, "~> 2.17", optional: true},
