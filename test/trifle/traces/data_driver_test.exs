@@ -147,6 +147,39 @@ defmodule Trifle.Traces.DataDriverTest do
   end
 
   for mode <- [:live, :deferred] do
+    test "#{mode} wrapup cleans File and S3 attachment sources while preserving stored copies" do
+      root = Path.join(System.tmp_dir!(), "trifle-upload-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      {:ok, agent} = Agent.start_link(fn -> %{objects: %{}, lifecycles: %{}} end)
+
+      for data <- [
+            FileDriver.new(path: Path.join(root, "storage"), gzip: true),
+            S3.new(adapter: FakeS3, client: agent, buckets: ["traces-a"], gzip: true)
+          ] do
+        path = Path.join(root, "source.txt")
+        File.write!(path, "report")
+
+        config =
+          Trifle.Traces.Configuration.new(
+            index_driver: Trifle.Traces.Driver.Index.Memory.new(),
+            data_driver: data,
+            bump_every: 0
+          )
+
+        {:ok, tracer} =
+          Trifle.Traces.start_tracer("jobs/cleanup", config: config, mode: unquote(mode))
+
+        Trifle.Traces.artifact("public.txt", path, tracer: tracer)
+        assert File.exists?(path)
+        final = Trifle.Traces.wrapup(tracer: tracer)
+
+        refute File.exists?(path)
+        record = Trifle.Traces.find(final.reference, config: config)
+        assert Trifle.Traces.read_artifact(record, "public.txt", config: config) == "report"
+      end
+    end
+
     test "#{mode} mode stores the selected S3 bucket name in the index" do
       {:ok, agent} = Agent.start_link(fn -> %{objects: %{}, lifecycles: %{}} end)
       data = S3.new(adapter: FakeS3, client: agent, buckets: ["selected-traces"])

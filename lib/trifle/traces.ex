@@ -107,7 +107,7 @@ defmodule Trifle.Traces do
   end
 
   def artifact(name, path, options \\ []) do
-    if tracer = tracer_from(options), do: unwrap(Tracer.artifact(tracer, name, path))
+    if tracer = tracer_from(options), do: unwrap(Tracer.artifact(tracer, name, path, options))
   end
 
   def fail(options \\ []), do: set_state(:error, options)

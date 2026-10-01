@@ -64,6 +64,13 @@ Without persistence drivers, trace data remains in the final tracer snapshot
 received by callbacks. Block tracing remains transparent when no tracer is
 active: the function still runs and its result is returned.
 
+With automated persistence, uploaded artifact source files are removed after
+final payload and index writes succeed at wrapup, before wrapup callbacks. Live
+uploads and failed wrapups retain files until then. Use
+`Trifle.Traces.artifact(name, path, cleanup: false)` to keep reusable sources.
+Callback-only setups, Null data drivers, and direct driver writes retain sources.
+Cleanup errors are logged; termination before wrapup can leave files behind.
+
 ## Configuration
 
 ```elixir

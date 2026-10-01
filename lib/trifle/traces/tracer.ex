@@ -42,7 +42,10 @@ defmodule Trifle.Traces.Tracer do
     do: GenServer.call(pid, {:end_trace, self(), message, state, result})
 
   def tag(pid, tag), do: GenServer.call(pid, {:tag, tag})
-  def artifact(pid, name, path), do: GenServer.call(pid, {:artifact, name, path})
+
+  def artifact(pid, name, path, options \\ []),
+    do: GenServer.call(pid, {:artifact, name, path, options})
+
   def set_state(pid, state), do: GenServer.call(pid, {:state, state})
   def ignore(pid), do: GenServer.call(pid, :ignore)
   def snapshot(pid), do: GenServer.call(pid, :snapshot)
@@ -135,14 +138,16 @@ defmodule Trifle.Traces.Tracer do
     reply_after_bump(tracer, tag)
   end
 
-  def handle_call({:artifact, name, path}, _from, tracer) do
+  def handle_call({:artifact, name, path, options}, _from, tracer) do
     size = File.stat!(path).size
     entry = %{at: now(), message: name, state: :success, type: :media, size: size}
 
     tracer = %{
       tracer
       | data: tracer.data ++ [entry],
-        artifacts: tracer.artifacts ++ [%{name: name, path: path}]
+        artifacts:
+          tracer.artifacts ++
+            [%{name: name, path: path, cleanup: Keyword.get(options, :cleanup, true)}]
     }
 
     reply_after_bump(tracer, path)

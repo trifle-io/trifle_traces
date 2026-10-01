@@ -116,6 +116,37 @@ defmodule Trifle.Traces.ExternalDriverTest do
         assert S3.read(driver, record) == entries
         assert S3.read_artifact(driver, record, "report.txt") == "artifact"
         S3.delete(driver, record)
+
+        root =
+          Path.join(System.tmp_dir!(), "trifle-s3-source-#{System.unique_integer([:positive])}")
+
+        File.mkdir_p!(root)
+        on_exit(fn -> File.rm_rf!(root) end)
+
+        for mode <- [:live, :deferred] do
+          path = Path.join(root, "report.txt")
+          File.write!(path, "artifact")
+
+          config =
+            Configuration.new(
+              index_driver: Trifle.Traces.Driver.Index.Memory.new(),
+              data_driver: driver,
+              bump_every: 0
+            )
+
+          {:ok, tracer} =
+            Trifle.Traces.start_tracer("jobs/s3/cleanup", config: config, mode: mode)
+
+          Trifle.Traces.artifact("public.txt", path, tracer: tracer)
+          assert File.exists?(path)
+          final = Trifle.Traces.wrapup(tracer: tracer)
+          refute File.exists?(path)
+
+          stored = Trifle.Traces.find(final.reference, config: config)
+          assert Trifle.Traces.read_artifact(stored, "public.txt", config: config) == "artifact"
+          S3.delete(driver, stored)
+        end
+
         {:ok, _} = bucket |> ExAws.S3.delete_bucket() |> ExAws.request(client)
     end
   end

@@ -6,6 +6,8 @@
 - Supervised, process-safe tracers with explicit Task propagation.
 - Nested tracing, serializers, states, tags, artifacts, callbacks, and ignore semantics.
 - Live and deferred persistence through Postgres, Mongo, S3, File, Memory, and Null drivers.
+- Uploaded artifact source files are removed after successful wrapup; failed
+  writes retain files for retry and `cleanup: false` preserves reusable sources.
 - S3 persists bucket names on trace records, keeping payload routing stable when
   the configured bucket list changes.
 - PostgreSQL index driver with shared Ruby/Elixir JSONB schema, Ecto Repo reuse,

@@ -1,9 +1,18 @@
 defmodule Trifle.Traces.Dispatcher do
   @moduledoc false
 
+  require Logger
+
   alias Trifle.Traces.{Driver, Ref, TraceRecord, Tracer}
 
-  defstruct [:config, :record, :started_at, pending: [], pending_artifacts: []]
+  defstruct [
+    :config,
+    :record,
+    :started_at,
+    pending: [],
+    pending_artifacts: [],
+    artifact_sources: %{}
+  ]
 
   def new(%Tracer{} = tracer) do
     validate_capabilities!(tracer)
@@ -79,7 +88,7 @@ defmodule Trifle.Traces.Dispatcher do
 
       function = if live?(tracer), do: :update, else: :create
       Driver.call(dispatcher.config.index_driver, function, [dispatcher.record])
-      {dispatcher, tracer}
+      {cleanup_artifacts(dispatcher), tracer}
     else
       {dispatcher, tracer}
     end
@@ -135,15 +144,49 @@ defmodule Trifle.Traces.Dispatcher do
   end
 
   defp upload_artifacts(dispatcher) do
-    Enum.each(dispatcher.pending_artifacts, fn artifact ->
-      Driver.call(dispatcher.config.data_driver, :write_artifact, [
-        dispatcher.record,
-        artifact.name,
-        [path: artifact.path]
-      ])
+    sources =
+      Enum.reduce(dispatcher.pending_artifacts, dispatcher.artifact_sources, fn artifact,
+                                                                                sources ->
+        Driver.call(dispatcher.config.data_driver, :write_artifact, [
+          dispatcher.record,
+          artifact.name,
+          [path: artifact.path]
+        ])
+
+        cleanup = Map.get(artifact, :cleanup, true)
+        Map.update(sources, Path.expand(artifact.path), cleanup, &(&1 && cleanup))
+      end)
+
+    %{dispatcher | pending_artifacts: [], artifact_sources: sources}
+  end
+
+  # Sources survive bumps and failed wrapups for retries. An explicit opt-out
+  # wins when the same file is attached more than once.
+  defp cleanup_artifacts(%{config: %{data_driver: %Driver.Data.Null{}}} = dispatcher),
+    do: dispatcher
+
+  defp cleanup_artifacts(dispatcher) do
+    Enum.each(dispatcher.artifact_sources, fn
+      {path, true} -> remove_artifact_source(path)
+      _ -> :ok
     end)
 
-    %{dispatcher | pending_artifacts: []}
+    %{dispatcher | artifact_sources: %{}}
+  end
+
+  defp remove_artifact_source(path) do
+    case File.rm(path) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Trifle.Traces artifact cleanup failed for #{path}: #{:file.format_error(reason)}"
+        )
+    end
   end
 
   defp offload_pending(dispatcher) do
@@ -223,8 +266,10 @@ defmodule Trifle.Traces.Dispatcher do
       rescue
         _ -> :ok
       end
-    end
 
-    {dispatcher, tracer}
+      {cleanup_artifacts(dispatcher), tracer}
+    else
+      {dispatcher, tracer}
+    end
   end
 end
