@@ -105,7 +105,7 @@ if Code.ensure_loaded?(Mongo) and Code.ensure_loaded?(BSON.ObjectId) do
         "meta" => if(is_nil(record.meta), do: nil, else: Jason.encode!(record.meta)),
         "first_at" => record.first_at,
         "retention" => record.retention,
-        "bucket_id" => record.bucket_id
+        "bucket_name" => record.bucket_name
       })
     end
 
@@ -139,7 +139,7 @@ if Code.ensure_loaded?(Mongo) and Code.ensure_loaded?(BSON.ObjectId) do
         last_at: field(document, "last_at"),
         retention: field(document, "retention"),
         expires_at: field(document, "expires_at"),
-        bucket_id: field(document, "bucket_id") || 0
+        bucket_name: field(document, "bucket_name")
       }
     end
 

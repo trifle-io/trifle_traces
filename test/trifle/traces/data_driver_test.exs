@@ -50,7 +50,7 @@ defmodule Trifle.Traces.DataDriverTest do
       first_at: DateTime.utc_now(),
       last_at: DateTime.utc_now(),
       expires_at: DateTime.add(DateTime.utc_now(), 3, :day),
-      bucket_id: 0
+      bucket_name: "traces-a"
     }
 
     entries = [
@@ -144,5 +144,58 @@ defmodule Trifle.Traces.DataDriverTest do
     assert_raise ArgumentError, "S3 driver requires at least one bucket", fn ->
       S3.new(buckets: [])
     end
+  end
+
+  for mode <- [:live, :deferred] do
+    test "#{mode} mode stores the selected S3 bucket name in the index" do
+      {:ok, agent} = Agent.start_link(fn -> %{objects: %{}, lifecycles: %{}} end)
+      data = S3.new(adapter: FakeS3, client: agent, buckets: ["selected-traces"])
+
+      config =
+        Trifle.Traces.Configuration.new(
+          index_driver: Trifle.Traces.Driver.Index.Memory.new(),
+          data_driver: data,
+          default_mode: unquote(mode),
+          bump_every: 0
+        )
+
+      {:ok, tracer} = Trifle.Traces.start_tracer("jobs/bucket-name", config: config)
+      Trifle.Traces.trace("stored", tracer: tracer)
+      final = Trifle.Traces.wrapup(tracer: tracer)
+      record = Trifle.Traces.find(final.reference, config: config)
+
+      assert record.bucket_name == "selected-traces"
+      changed = %{config | data_driver: %{data | buckets: ["replacement-traces"]}}
+      assert Enum.any?(Trifle.Traces.payload(record, config: changed), &(&1.message == "stored"))
+    end
+  end
+
+  test "S3 uses the recorded bucket after configured buckets are reordered or replaced",
+       context do
+    {:ok, agent} = Agent.start_link(fn -> %{objects: %{}, lifecycles: %{}} end)
+    driver = S3.new(adapter: FakeS3, client: agent, buckets: ["traces-a", "traces-b"])
+    record = context.record
+
+    assert S3.generate_bucket_name(driver) in ["traces-a", "traces-b"]
+    S3.write_part(driver, record, 1, [hd(context.entries)])
+    S3.write_artifact(driver, record, "report.txt", payload: "report")
+
+    for buckets <- [["traces-b", "traces-a"], ["traces-new"]] do
+      changed = %{driver | buckets: buckets}
+
+      assert S3.read_part(changed, record, 1) == [hd(context.entries)]
+      assert S3.read_artifact(changed, record, "report.txt") == "report"
+      S3.write_part(changed, record, 2, [List.last(context.entries)])
+      S3.write_artifact(changed, record, "continued.txt", payload: "continued")
+      assert S3.read(changed, record) == context.entries
+      assert S3.read_artifact(changed, record, "continued.txt") == "continued"
+    end
+
+    assert Agent.get(agent, fn state ->
+             Enum.all?(Map.keys(state.objects), fn {bucket, _key} -> bucket == "traces-a" end)
+           end)
+
+    S3.delete(%{driver | buckets: ["traces-new"]}, record)
+    assert Agent.get(agent, & &1.objects) == %{}
   end
 end

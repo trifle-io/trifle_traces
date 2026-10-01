@@ -43,6 +43,16 @@ defmodule Trifle.Traces.ExternalDriverTest do
         assert record.context == %{"tenant_id" => 42}
         assert record.counters.states.success == record.length
 
+        named = %{
+          record
+          | reference: MongoIndex.generate_reference(config.index_driver),
+            bucket_name: "traces-a"
+        }
+
+        MongoIndex.create(config.index_driver, named)
+        assert MongoIndex.find(config.index_driver, named.reference).bucket_name == "traces-a"
+        MongoIndex.delete(config.index_driver, named.reference)
+
         result =
           Trifle.Traces.search(
             config: config,
@@ -95,7 +105,8 @@ defmodule Trifle.Traces.ExternalDriverTest do
           retention: 3,
           first_at: now,
           last_at: now,
-          expires_at: DateTime.add(now, 3, :day)
+          expires_at: DateTime.add(now, 3, :day),
+          bucket_name: bucket
         }
 
         entries = [%{at: 1_700_000_000, message: "s3", state: :success, type: :text, level: 0}]
@@ -149,6 +160,11 @@ defmodule Trifle.Traces.ExternalDriverTest do
         assert record.reference == final.reference
         assert record.context == %{"tenant_id" => 42}
         assert record.counters.states.success == record.length
+
+        named = %{record | reference: "named-bucket", bucket_name: "traces-a"}
+        PostgresIndex.create(driver, named)
+        assert PostgresIndex.find(driver, named.reference).bucket_name == "traces-a"
+        PostgresIndex.delete(driver, named.reference)
 
         result =
           Trifle.Traces.search(

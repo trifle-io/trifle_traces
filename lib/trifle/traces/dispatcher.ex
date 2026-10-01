@@ -26,7 +26,7 @@ defmodule Trifle.Traces.Dispatcher do
       last_at: now,
       retention: retention,
       expires_at: DateTime.add(now, retention, :day),
-      bucket_id: Driver.call(tracer.config.data_driver, :generate_bucket_id)
+      bucket_name: Driver.call(tracer.config.data_driver, :generate_bucket_name)
     }
 
     {%__MODULE__{

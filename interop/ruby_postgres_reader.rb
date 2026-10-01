@@ -18,7 +18,7 @@ valid = record.key == 'jobs/interop/elixir' &&
         record.duration == 2_500 &&
         record.counters[:states][:warning] == 1 &&
         record.counters[:max_level] == 2 &&
-        record.bucket_id == 4
+        record.bucket_name == 'elixir-traces'
 abort 'Ruby could not decode the Elixir-generated PostgreSQL record' unless valid
 
 result = driver.search(

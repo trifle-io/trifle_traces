@@ -19,7 +19,7 @@ defmodule Trifle.Traces.TraceRecord do
             last_at: nil,
             retention: 7,
             expires_at: nil,
-            bucket_id: 0
+            bucket_name: nil
 
   @type t :: %__MODULE__{}
 

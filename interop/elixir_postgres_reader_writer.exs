@@ -22,7 +22,7 @@ unless ruby_record.key == "jobs/interop/ruby" and ruby_record.state == :error an
          ruby_record.meta == %{"writer" => "ruby"} and
          ruby_record.context == %{"tenant_id" => 42} and ruby_record.duration == 1_250 and
          ruby_record.counters.states.error == 1 and ruby_record.counters.max_level == 1 and
-         ruby_record.bucket_id == 3 do
+         ruby_record.bucket_name == "ruby-traces" do
   raise "Elixir could not decode the Ruby-generated PostgreSQL record"
 end
 
@@ -59,7 +59,7 @@ elixir_record = %TraceRecord{
   last_at: DateTime.add(first_at, 2_500, :millisecond),
   retention: 30,
   expires_at: DateTime.add(first_at, 30, :day),
-  bucket_id: 4
+  bucket_name: "elixir-traces"
 }
 
 PostgresIndex.create(driver, elixir_record)

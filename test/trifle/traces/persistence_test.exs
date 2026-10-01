@@ -15,7 +15,7 @@ defmodule Trifle.Traces.PersistenceTest do
       %__MODULE__{delegate: MemoryData.new(), attempts: attempts}
     end
 
-    def generate_bucket_id(driver), do: MemoryData.generate_bucket_id(driver.delegate)
+    def generate_bucket_name(driver), do: MemoryData.generate_bucket_name(driver.delegate)
 
     def write_part(driver, record, part, entries) do
       attempt = Agent.get_and_update(driver.attempts, &{&1 + 1, &1 + 1})

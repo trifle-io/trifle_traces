@@ -10,7 +10,7 @@ record = Trifle::Traces::TraceRecord.new(
   tags: [], meta: nil, context: {}, duration: 0,
   counters: Trifle::Traces::TraceRecord.empty_counters,
   length: 1, parts: 1, first_at: now, last_at: now,
-  retention: 3, expires_at: now + (3 * 86_400), bucket_id: 0
+  retention: 3, expires_at: now + (3 * 86_400), bucket_name: nil
 )
 
 driver = Trifle::Traces::Driver::Data::File.new(path: path)

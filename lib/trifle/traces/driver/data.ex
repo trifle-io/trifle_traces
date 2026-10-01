@@ -3,7 +3,7 @@ defmodule Trifle.Traces.Driver.Data do
 
   alias Trifle.Traces.TraceRecord
 
-  @callback generate_bucket_id(struct()) :: non_neg_integer()
+  @callback generate_bucket_name(struct()) :: String.t() | nil
   @callback write_part(struct(), TraceRecord.t(), pos_integer(), [map()]) :: term()
   @callback write_artifact(struct(), TraceRecord.t(), String.t(), keyword()) :: term()
   @callback read_part(struct(), TraceRecord.t(), pos_integer()) :: [map()]

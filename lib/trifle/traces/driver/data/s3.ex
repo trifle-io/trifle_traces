@@ -42,13 +42,13 @@ defmodule Trifle.Traces.Driver.Data.S3 do
   end
 
   @impl true
-  def generate_bucket_id(driver), do: :rand.uniform(length(driver.buckets)) - 1
+  def generate_bucket_name(driver), do: Enum.random(driver.buckets)
 
   @impl true
   def write_part(driver, record, part, entries) do
     driver.adapter.put_object(
       driver.client,
-      bucket_for(driver, record),
+      record.bucket_name,
       object_key(driver, record, Encoding.part_name(part, driver.gzip)),
       Encoding.pack_entries(entries, driver.gzip)
     )
@@ -60,7 +60,7 @@ defmodule Trifle.Traces.Driver.Data.S3 do
 
     driver.adapter.put_object(
       driver.client,
-      bucket_for(driver, record),
+      record.bucket_name,
       object_key(driver, record, "artifacts/#{name}"),
       body
     )
@@ -72,7 +72,7 @@ defmodule Trifle.Traces.Driver.Data.S3 do
   def read_part(driver, record, part) do
     driver.adapter.get_object(
       driver.client,
-      bucket_for(driver, record),
+      record.bucket_name,
       object_key(driver, record, Encoding.part_name(part, driver.gzip))
     )
     |> Encoding.unpack_entries(driver.gzip)
@@ -89,21 +89,18 @@ defmodule Trifle.Traces.Driver.Data.S3 do
   def read_artifact(driver, record, name) do
     driver.adapter.get_object(
       driver.client,
-      bucket_for(driver, record),
+      record.bucket_name,
       object_key(driver, record, "artifacts/#{name}")
     )
   end
 
   @impl true
   def delete(driver, record) do
-    bucket = bucket_for(driver, record)
+    bucket = record.bucket_name
     prefix = object_key(driver, record, "")
     keys = driver.adapter.list_objects(driver.client, bucket, prefix)
     driver.adapter.delete_objects(driver.client, bucket, keys)
   end
-
-  defp bucket_for(driver, record),
-    do: Enum.at(driver.buckets, rem(record.bucket_id, length(driver.buckets)))
 
   defp object_key(driver, record, name) do
     "#{record.retention}/#{driver.prefix}/#{record.key}/#{record.reference}/#{name}"

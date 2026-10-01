@@ -5,7 +5,7 @@ defmodule Trifle.Traces.Driver.Data.Null do
   defstruct []
 
   @impl true
-  def generate_bucket_id(_driver), do: 0
+  def generate_bucket_name(_driver), do: nil
 
   @impl true
   def write_part(_driver, _record, _part, _entries), do: :ok

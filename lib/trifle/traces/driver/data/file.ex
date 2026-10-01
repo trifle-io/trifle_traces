@@ -43,7 +43,7 @@ defmodule Trifle.Traces.Driver.Data.File do
   end
 
   @impl true
-  def generate_bucket_id(_driver), do: 0
+  def generate_bucket_name(_driver), do: nil
 
   @impl true
   def write_part(driver, record, part, entries) do

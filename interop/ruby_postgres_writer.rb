@@ -32,7 +32,7 @@ record = Trifle::Traces::TraceRecord.new(
   last_at: first_at + 1.25,
   retention: 7,
   expires_at: first_at + (7 * 86_400),
-  bucket_id: 3
+  bucket_name: 'ruby-traces'
 )
 
 driver.create(record)

@@ -140,6 +140,10 @@ Available index drivers: Postgres, Mongo, Memory, and Null. Available data
 drivers: S3, File, Memory, and Null. Database and object-storage clients are
 optional and injected by the host application.
 
+S3 selects a bucket once per trace and persists its name as `bucket_name` in the
+index. Reads, writes, and deletes use that name directly, so changing the bucket
+list does not redirect existing traces. File, Memory, and Null store `nil`.
+
 ## Reading persisted traces
 
 ```elixir
