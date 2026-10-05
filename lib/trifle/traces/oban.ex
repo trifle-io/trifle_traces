@@ -8,6 +8,11 @@ defmodule Trifle.Traces.Oban do
   Job arguments are stored directly in `meta`, matching the Ruby integrations.
   Job ID, queue, worker and attempt are stored in `context`. Configured context
   is merged with these defaults and takes precedence on matching keys.
+
+  Pass `mode: :deferred` or `mode: fn job -> ... end` to choose the trace mode
+  when execution starts, including jobs queued before the configuration changed.
+  A missing or nil mode uses `config.default_mode`. Deferred traces run only
+  wrapup callbacks and persistence.
   """
 
   use GenServer

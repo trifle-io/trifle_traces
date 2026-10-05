@@ -110,6 +110,39 @@ Trifle.Traces.Driver.Index.Postgres.cleanup!(MyApp.Repo)
 The Postgres driver accepts either a Postgrex connection or an Ecto Repo that
 exports `query!/3`. Passing the application Repo reuses its existing pool.
 
+## Activity Stats
+
+Add `{:trifle_stats, "~> 2.0"}` to your application, configure Stats normally,
+and pass that configuration to Traces:
+
+```elixir
+stats_config = Trifle.Stats.Configuration.configure(
+  Trifle.Stats.Driver.Mongo.new(:mongo, "trifle_traces_stats"),
+  time_zone: "Etc/UTC",
+  track_granularities: ["10m", "1h", "1d"],
+  buffer_enabled: false
+)
+
+Trifle.Traces.configure(
+  index_driver: index_driver,
+  data_driver: data_driver,
+  stats_config: stats_config
+)
+```
+
+Provision the Stats driver's indexes once before starting workers. `stats_config`
+defaults to `nil`; global Stats is not used implicitly. The supplied configuration
+owns storage, granularities, timezone, week start and buffering.
+
+The SDK tracks the full trace key after successful wrapup for live and deferred
+traces, before user callbacks, using finalized counts and millisecond duration
+without another index query. Values include `count`, `states.<state>`,
+`entries.count`, duration count/sum/square and per-state duration samples, matching
+Ruby and Trifle App. Ignored traces and failed final writes emit no metrics.
+Stats failures are logged without failing the trace; callbacks stay independent.
+Tracking also works without persistence drivers, retaining callback data.
+See [configuration](https://docs.trifle.io/trifle-traces-ex/configuration#activity-metrics).
+
 ## Current tracer and Tasks
 
 The concise API uses a process-local tracer binding. BEAM processes do not
@@ -135,13 +168,34 @@ calling process.
 - `:live` creates the index record at liftoff and flushes numbered payload
   parts as the trace runs.
 - `:deferred` performs no storage I/O before wrapup, then writes one payload
-  part and one final index record.
+  part and one final index record. It skips liftoff and bump callbacks, even
+  with `bump_every: 0`, and runs only wrapup callbacks.
 
 ```elixir
 Trifle.Traces.with_tracer("jobs/high-volume", [mode: :deferred], fn ->
   # work
 end)
 ```
+
+With persistence configured, callbacks receive the dispatcher's in-memory
+metadata as `tracer.trace_record`, without querying the index. At successful
+wrapup this includes final `duration` in milliseconds, `length`, `parts`,
+`counters`, `tags`, and `bucket_name`:
+
+```elixir
+on_wrapup: fn tracer ->
+  unless tracer.ignore do
+    record = Trifle.Traces.Tracer.trace_record(tracer)
+    Metrics.trace_finished(record.key, record.duration, record.length)
+  end
+end
+```
+
+`Trifle.Traces.Tracer.trace_record/1` also accepts an active tracer PID. It
+reflects the last persistence operation, so a deferred trace has no persisted
+entries until wrapup. Callback and final snapshots retain this immutable record
+after the tracer process stops. Without persistence drivers, use the snapshot's
+`data` for accumulated entries.
 
 Available index drivers: Postgres, Mongo, Memory, and Null. Available data
 drivers: S3, File, Memory, and Null. Database and object-storage clients are
@@ -190,10 +244,16 @@ Oban uses the same lifecycle pattern:
 
 ```elixir
 children = [
-  {Trifle.Traces.Oban, selector: fn job -> job.queue != "discardable" end},
+  {Trifle.Traces.Oban,
+   selector: fn job -> job.queue != "discardable" end,
+   mode: fn job -> if job.worker == "MyApp.CalculateWorker", do: :deferred, else: :live end},
   {Oban, Application.fetch_env!(:my_app, Oban)}
 ]
 ```
+
+The mode is selected when execution starts, so current handler configuration
+also applies to already queued jobs. A missing or nil mode falls back to
+`config.default_mode`.
 
 ## Development
 

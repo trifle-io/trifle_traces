@@ -100,6 +100,30 @@ defmodule Trifle.Traces.CoreTest do
     assert wrapped == final
   end
 
+  test "deferred mode only runs wrapup callbacks even with immediate bumps" do
+    parent = self()
+
+    config =
+      Configuration.new(
+        bump_every: 0,
+        on_liftoff: fn tracer -> send(parent, {:lifecycle, :liftoff, tracer}) end,
+        on_bump: fn tracer -> send(parent, {:lifecycle, :bump, tracer}) end,
+        on_wrapup: fn tracer -> send(parent, {:lifecycle, :wrapup, tracer}) end
+      )
+
+    {:ok, tracer} = Trifle.Traces.start_tracer("jobs/deferred", config: config, mode: :deferred)
+    Trifle.Traces.trace("working", tracer: tracer)
+    Trifle.Traces.tag("tenant:42", tracer: tracer)
+    assert Trifle.Traces.trace("result", [tracer: tracer], fn -> 42 end) == 42
+
+    refute_receive {:lifecycle, _, _}
+    final = Trifle.Traces.wrapup(tracer: tracer)
+    assert_receive {:lifecycle, :wrapup, ^final}
+    refute_receive {:lifecycle, _, _}
+    assert final.state == :success
+    assert length(final.data) == 5
+  end
+
   test "block errors are recorded and re-raised" do
     {:ok, tracer} = Trifle.Traces.start_tracer("jobs/error")
 
@@ -193,6 +217,11 @@ defmodule Trifle.Traces.CoreTest do
     snapshot = Tracer.snapshot(tracer)
     assert snapshot.reference == "explicit"
     assert snapshot.mode == :deferred
+    Trifle.Traces.wrapup(tracer: tracer)
+
+    config = Configuration.new(default_mode: :deferred)
+    {:ok, tracer} = Trifle.Traces.start_tracer("jobs/default-mode", config: config, mode: nil)
+    assert Tracer.snapshot(tracer).mode == :deferred
     Trifle.Traces.wrapup(tracer: tracer)
 
     assert {:error, {%ArgumentError{message: message}, _stacktrace}} =

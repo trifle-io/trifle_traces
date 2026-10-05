@@ -16,7 +16,8 @@ defmodule Trifle.Traces.Configuration do
             payload_size_limit: 100 * 1024,
             error_handler: nil,
             context: %{},
-            retention: 7
+            retention: 7,
+            stats_config: nil
 
   @type t :: %__MODULE__{}
 

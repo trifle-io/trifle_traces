@@ -3,7 +3,7 @@ defmodule Trifle.Traces.Dispatcher do
 
   require Logger
 
-  alias Trifle.Traces.{Driver, Ref, TraceRecord, Tracer}
+  alias Trifle.Traces.{Driver, Ref, Stats, TraceRecord, Tracer}
 
   defstruct [
     :config,
@@ -88,10 +88,22 @@ defmodule Trifle.Traces.Dispatcher do
 
       function = if live?(tracer), do: :update, else: :create
       Driver.call(dispatcher.config.index_driver, function, [dispatcher.record])
-      {cleanup_artifacts(dispatcher), tracer}
+      dispatcher = cleanup_artifacts(dispatcher)
+      Stats.track(dispatcher.record, dispatcher.config.stats_config)
+      {dispatcher, tracer}
     else
+      dispatcher = finalize_without_persistence(dispatcher, tracer)
+      Stats.track(dispatcher.record, dispatcher.config.stats_config)
       {dispatcher, tracer}
     end
+  end
+
+  defp finalize_without_persistence(%{config: %{stats_config: nil}} = dispatcher, _tracer),
+    do: dispatcher
+
+  defp finalize_without_persistence(dispatcher, tracer) do
+    dispatcher = sync_record(dispatcher, tracer)
+    %{dispatcher | record: %{dispatcher.record | length: length(tracer.data)}}
   end
 
   defp persistence?(dispatcher), do: dispatcher.config.persistence

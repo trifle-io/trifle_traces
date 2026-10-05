@@ -153,6 +153,71 @@ defmodule Trifle.Traces.IntegrationsTest do
     end
   end
 
+  test "Oban selects deferred mode at execution time for already queued jobs" do
+    parent = self()
+
+    config =
+      Configuration.new(
+        index_driver: Trifle.Traces.Driver.Index.Memory.new(),
+        data_driver: Trifle.Traces.Driver.Data.Memory.new(),
+        bump_every: 0,
+        on_liftoff: fn tracer -> send(parent, {:callback, :liftoff, tracer}) end,
+        on_bump: fn tracer -> send(parent, {:callback, :bump, tracer}) end,
+        on_wrapup: fn tracer -> send(parent, {:callback, :wrapup, tracer}) end
+      )
+
+    # The queued job carries no tracing mode. Current handler configuration
+    # decides the mode when execution starts.
+    job = %{id: 12, queue: "calculator", worker: "MyApp.CalculateWorker", attempt: 1, args: %{}}
+
+    options = [
+      config: config,
+      mode: fn job -> if job.worker == "MyApp.CalculateWorker", do: :deferred, else: :live end
+    ]
+
+    Trifle.Traces.Oban.handle_event([:oban, :job, :start], %{}, %{job: job}, options)
+    tracer = Trifle.Traces.current_tracer()
+    snapshot = Trifle.Traces.Tracer.snapshot(tracer)
+    assert snapshot.mode == :deferred
+    Trifle.Traces.trace("calculated")
+    Trifle.Traces.tag("product:42")
+    assert Trifle.Traces.find(snapshot.reference, config: config) == nil
+    refute_receive {:callback, _, _}
+
+    Trifle.Traces.Oban.handle_event([:oban, :job, :stop], %{}, %{job: job}, options)
+    assert Trifle.Traces.current_tracer() == nil
+    assert_receive {:callback, :wrapup, final}
+    refute_receive {:callback, _, _}
+    record = Trifle.Traces.Tracer.trace_record(final)
+    assert record == Trifle.Traces.find(snapshot.reference, config: config)
+    assert record.parts == 1
+    assert record.tags == ["product:42"]
+    assert record.state == :success
+  end
+
+  test "Oban falls back to the configured mode and honors explicit overrides" do
+    config =
+      Configuration.new(
+        default_mode: :deferred,
+        index_driver: Trifle.Traces.Driver.Index.Memory.new()
+      )
+
+    job = %{id: 13, queue: "default", worker: "MyApp.Worker", attempt: 1, args: %{}}
+
+    for {mode_options, expected} <- [
+          {[], :deferred},
+          {[mode: fn _job -> nil end], :deferred},
+          {[mode: :live], :live},
+          {[mode: fn _job -> "live" end], :live}
+        ] do
+      options = Keyword.merge([config: config], mode_options)
+      Trifle.Traces.Oban.handle_event([:oban, :job, :start], %{}, %{job: job}, options)
+      tracer = Trifle.Traces.current_tracer()
+      assert Trifle.Traces.Tracer.snapshot(tracer).mode == expected
+      Trifle.Traces.Oban.handle_event([:oban, :job, :stop], %{}, %{job: job}, options)
+    end
+  end
+
   test "selectors skip Phoenix requests and Oban jobs" do
     options = [selector: fn _ -> false end, config: callback_config(self())]
     conn = conn(:get, "/skip")

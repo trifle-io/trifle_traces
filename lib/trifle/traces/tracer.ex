@@ -22,6 +22,7 @@ defmodule Trifle.Traces.Tracer do
             monitors: %{},
             monitor_owners: %{},
             bumped_at: nil,
+            trace_record: nil,
             dispatcher: nil
 
   @type t :: %__MODULE__{}
@@ -51,6 +52,16 @@ defmodule Trifle.Traces.Tracer do
   def snapshot(pid), do: GenServer.call(pid, :snapshot)
   def wrapup(pid), do: GenServer.call(pid, :wrapup, :infinity)
 
+  @doc """
+  Returns the dispatcher's in-memory metadata without querying the index driver.
+
+  Accepts an active tracer PID or a callback/final snapshot. Metadata reflects
+  the last successful persistence operation; deferred traces are finalized at
+  wrapup. Snapshots retain the record after the tracer process stops.
+  """
+  def trace_record(%__MODULE__{trace_record: record}), do: record
+  def trace_record(pid) when is_pid(pid), do: GenServer.call(pid, :trace_record)
+
   def keys(%__MODULE__{key: key}) do
     key
     |> to_string()
@@ -61,15 +72,14 @@ defmodule Trifle.Traces.Tracer do
   @impl true
   def init(options) do
     config = Keyword.fetch!(options, :config)
-    mode = options |> Keyword.get(:mode, config.default_mode) |> normalize_mode!()
+    mode = normalize_mode!(Keyword.get(options, :mode) || config.default_mode)
 
     tracer = %__MODULE__{
       key: Keyword.fetch!(options, :key),
       meta: Keyword.get(options, :meta),
       config: config,
       mode: mode,
-      reference: Keyword.get(options, :reference),
-      bumped_at: System.monotonic_time(:millisecond)
+      reference: Keyword.get(options, :reference)
     }
 
     tracer =
@@ -78,13 +88,19 @@ defmodule Trifle.Traces.Tracer do
     {dispatcher, tracer} = Dispatcher.new(tracer)
     tracer = %{tracer | dispatcher: dispatcher}
 
-    case persist(tracer, :liftoff, &Dispatcher.liftoff/2) do
-      {:ok, tracer} ->
-        run_callbacks(tracer, :liftoff)
-        {:ok, tracer}
+    if mode == :deferred do
+      {:ok, tracer}
+    else
+      tracer = %{tracer | bumped_at: System.monotonic_time(:millisecond)}
 
-      {:error, error, _tracer} ->
-        {:stop, error}
+      case persist(tracer, :liftoff, &Dispatcher.liftoff/2) do
+        {:ok, tracer} ->
+          run_callbacks(tracer, :liftoff)
+          {:ok, tracer}
+
+        {:error, error, _tracer} ->
+          {:stop, error}
+      end
     end
   end
 
@@ -157,6 +173,9 @@ defmodule Trifle.Traces.Tracer do
   def handle_call(:ignore, _from, tracer), do: {:reply, true, %{tracer | ignore: true}}
   def handle_call(:snapshot, _from, tracer), do: {:reply, public_snapshot(tracer), tracer}
 
+  def handle_call(:trace_record, _from, tracer),
+    do: {:reply, tracer.dispatcher.record, tracer}
+
   def handle_call(:wrapup, _from, tracer) do
     tracer = if tracer.state == :running, do: %{tracer | state: :success}, else: tracer
 
@@ -186,6 +205,9 @@ defmodule Trifle.Traces.Tracer do
       {:noreply, tracer}
     end
   end
+
+  defp reply_after_bump(%__MODULE__{mode: :deferred} = tracer, reply),
+    do: {:reply, reply, tracer}
 
   defp reply_after_bump(tracer, reply) do
     interval = round(tracer.config.bump_every * 1_000)
@@ -273,7 +295,14 @@ defmodule Trifle.Traces.Tracer do
   end
 
   defp public_snapshot(tracer) do
-    %{tracer | monitors: %{}, monitor_owners: %{}, levels: %{}, dispatcher: nil}
+    %{
+      tracer
+      | monitors: %{},
+        monitor_owners: %{},
+        levels: %{},
+        trace_record: tracer.dispatcher.record,
+        dispatcher: nil
+    }
   end
 
   defp normalize_mode!(mode) when mode in [:live, :deferred], do: mode

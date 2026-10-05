@@ -32,6 +32,7 @@ defmodule Trifle.Traces.MixProject do
     [
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.2"},
+      {:trifle_stats, "~> 2.0", optional: true},
       {:mongodb_driver, "~> 1.2.0", optional: true},
       {:postgrex, "~> 0.17", optional: true},
       {:ex_aws, "~> 2.5", optional: true},

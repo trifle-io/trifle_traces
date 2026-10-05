@@ -1,7 +1,7 @@
 defmodule Trifle.Traces.PersistenceTest do
   use ExUnit.Case
 
-  alias Trifle.Traces.{Configuration, TraceRecord}
+  alias Trifle.Traces.{Configuration, TraceRecord, Tracer}
   alias Trifle.Traces.Driver.Data.Memory, as: MemoryData
   alias Trifle.Traces.Driver.Index.Memory, as: MemoryIndex
 
@@ -47,6 +47,29 @@ defmodule Trifle.Traces.PersistenceTest do
     def delete(_driver, _reference), do: nil
     def find(_driver, _reference), do: nil
     def search(_driver, _filters), do: %{traces: [], cursor: nil}
+  end
+
+  defmodule WriteOnlyIndex do
+    @behaviour Trifle.Traces.Driver.Index
+
+    defstruct [:owner]
+
+    def generate_reference(_driver), do: Trifle.Traces.Ref.generate()
+    def capabilities(_driver), do: %{update: true, delete: true, search: false, ttl: :none}
+
+    def create(driver, record) do
+      send(driver.owner, {:index, :create, record})
+      record.reference
+    end
+
+    def update(driver, record) do
+      send(driver.owner, {:index, :update, record})
+      record.reference
+    end
+
+    def find(_driver, _reference), do: raise("unexpected index read")
+    def search(_driver, _filters), do: raise("unexpected index search")
+    def delete(_driver, _reference), do: nil
   end
 
   defp config(options) do
@@ -109,6 +132,77 @@ defmodule Trifle.Traces.PersistenceTest do
 
     assert record.parts == 1
     assert record.length == 3
+  end
+
+  test "callbacks and snapshots expose the persisted record without reading the index" do
+    parent = self()
+
+    for mode <- [:live, :deferred] do
+      data = MemoryData.new()
+
+      config =
+        config(
+          index_driver: %WriteOnlyIndex{owner: parent},
+          data_driver: data,
+          context: %{tenant_id: 42},
+          retention: 3,
+          on_liftoff: fn tracer -> send(parent, {:callback, :liftoff, tracer}) end,
+          on_bump: fn tracer -> send(parent, {:callback, :bump, tracer}) end,
+          on_wrapup: fn tracer -> send(parent, {:callback, :wrapup, tracer}) end
+        )
+
+      {:ok, tracer} = Trifle.Traces.start_tracer("jobs/metadata", config: config, mode: mode)
+      initial = Tracer.trace_record(tracer)
+      assert initial.reference == Tracer.snapshot(tracer).reference
+      assert initial.parts == if(mode == :live, do: 1, else: 0)
+
+      if mode == :live do
+        assert_receive {:index, :create, ^initial}
+        assert_receive {:callback, :liftoff, snapshot}
+        assert Tracer.trace_record(snapshot) == initial
+      else
+        refute_receive {:index, _, _}
+        refute_receive {:callback, _, _}
+      end
+
+      Trifle.Traces.tag("tenant:42", tracer: tracer)
+      Trifle.Traces.tag("tenant:42", tracer: tracer)
+      Trifle.Traces.trace("working", state: :warning, tracer: tracer)
+      Trifle.Traces.warn(tracer: tracer)
+
+      if mode == :live do
+        assert_receive {:callback, :bump, snapshot}
+        assert snapshot.trace_record.reference == initial.reference
+        assert_receive {:callback, :bump, _}
+        assert_receive {:callback, :bump, _}
+        assert_receive {:index, :update, _}
+      else
+        assert :ets.info(data.parts, :size) == 0
+        refute_receive {:index, _, _}
+        refute_receive {:callback, _, _}
+      end
+
+      final = Trifle.Traces.wrapup(tracer: tracer)
+      assert_receive {:callback, :wrapup, ^final}
+      record = Tracer.trace_record(final)
+      assert_receive {:index, event, ^record}
+      assert event == if(mode == :live, do: :update, else: :create)
+      refute_receive {:index, _, _}
+
+      assert record.state == :warning
+      assert record.tags == ["tenant:42"]
+      assert record.context == %{tenant_id: 42}
+      assert record.retention == 3
+      assert record.bucket_name == nil
+      assert record.parts == if(mode == :live, do: 2, else: 1)
+      assert record.length == 2
+      assert record.counters.states.success == 1
+      assert record.counters.states.warning == 1
+      assert record.counters.types.text == 2
+      assert record.duration >= 0
+      assert DateTime.compare(record.last_at, record.first_at) in [:eq, :gt]
+      assert length(MemoryData.read(data, record)) == record.length
+    end
   end
 
   test "live mode requires index updates while deferred mode accepts create-only indexes" do
