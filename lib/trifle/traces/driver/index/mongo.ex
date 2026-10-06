@@ -80,21 +80,29 @@ if Code.ensure_loaded?(Mongo) and Code.ensure_loaded?(BSON.ObjectId) do
 
     @impl true
     def search(driver, filters) do
-      limit = Query.limit(filters)
-      filter = search_filter(filters)
+      {filter, options} = search_query(filters)
 
       documents =
-        case Mongo.find(driver.connection, driver.collection_name, filter,
-               sort: %{"first_at" => -1, "_id" => -1},
-               limit: limit
-             ) do
+        case Mongo.find(driver.connection, driver.collection_name, filter, options) do
           {:error, error} -> raise error
           cursor -> Enum.to_list(cursor)
         end
 
       traces = Enum.map(documents, &record_for/1)
-      next_cursor = if length(traces) == limit, do: Query.encode_cursor(List.last(traces))
+
+      next_cursor =
+        if length(traces) == options[:limit], do: Query.encode_cursor(List.last(traces))
+
       %{traces: traces, cursor: next_cursor}
+    end
+
+    @doc false
+    def search_query(filters) do
+      limit = Query.limit(filters)
+
+      # BSON documents preserve list order; maps can put _id before first_at,
+      # defeating the chronological indexes and disagreeing with the cursor.
+      {search_filter(filters), [sort: [first_at: -1, _id: -1], limit: limit]}
     end
 
     defp document_for(record) do
@@ -163,7 +171,13 @@ if Code.ensure_loaded?(Mongo) and Code.ensure_loaded?(BSON.ObjectId) do
           filter
 
         position ->
-          Map.put(filter, "$or", [
+          # Bound the index scan at the cursor even when Mongo evaluates the
+          # tie-breaking $or as a residual filter rather than an index bound.
+          filter
+          |> Map.update("first_at", %{"$lte" => position.first_at}, fn conditions ->
+            Map.put(conditions, "$lte", position.first_at)
+          end)
+          |> Map.put("$or", [
             %{"first_at" => %{"$lt" => position.first_at}},
             %{"first_at" => position.first_at, "_id" => %{"$lt" => bson_id(position.reference)}}
           ])
