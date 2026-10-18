@@ -17,7 +17,7 @@ driver = Trifle::Traces::Driver::Data::File.new(path: path)
 entries = driver.read(record)
 
 abort 'Ruby could not read the Elixir-generated payload' unless entries == [
-  { at: 1_700_000_010, message: 'Elixir fixture', state: :success, type: :text, level: 0 }
+  { at: 1_700_000_010.654321, message: 'Elixir fixture', state: :success, type: :text, level: 0 }
 ]
 
 unless driver.read_artifact(record, name: 'elixir.txt') == 'written by Elixir'

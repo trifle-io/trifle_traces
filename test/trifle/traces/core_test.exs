@@ -45,6 +45,33 @@ defmodule Trifle.Traces.CoreTest do
     assert Trifle.Traces.read_artifact(record, "missing.txt") == nil
   end
 
+  test "all row types preserve fractional Unix seconds through JSON encoding" do
+    path =
+      Path.join(System.tmp_dir!(), "trace-timestamp-#{System.unique_integer([:positive])}.txt")
+
+    File.write!(path, "report")
+    on_exit(fn -> File.rm(path) end)
+    before = System.system_time(:microsecond) / 1_000_000
+    {:ok, tracer} = Trifle.Traces.start_tracer("jobs/timestamps", mode: :deferred)
+    Trifle.Traces.trace("plain", tracer: tracer)
+    Trifle.Traces.trace("header", tracer: tracer, head: true)
+    Trifle.Traces.trace("block", [tracer: tracer], fn -> 42 end)
+    Trifle.Traces.artifact("report.txt", path, tracer: tracer, cleanup: false)
+    final = Trifle.Traces.wrapup(tracer: tracer)
+    after_at = System.system_time(:microsecond) / 1_000_000
+
+    assert MapSet.new(Enum.map(final.data, & &1.type)) == MapSet.new([:text, :head, :raw, :media])
+
+    assert Enum.all?(final.data, fn entry ->
+             is_float(entry.at) and entry.at >= before and entry.at <= after_at
+           end)
+
+    alias Trifle.Traces.Driver.Data.Encoding
+
+    assert final.data |> Encoding.pack_entries(true) |> Encoding.unpack_entries(true) ==
+             final.data
+  end
+
   test "records lines, nested block results, tags, and state" do
     {:ok, tracer} = Trifle.Traces.start_tracer("jobs/import", meta: [42])
 

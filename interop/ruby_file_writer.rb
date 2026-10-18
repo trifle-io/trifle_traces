@@ -18,7 +18,7 @@ driver.write_part(
   record,
   part: 1,
   entries: [
-    { at: 1_700_000_020, message: 'Ruby generated', state: :warning, type: :head, level: 1 }
+    { at: 1_700_000_020.123456, message: 'Ruby generated', state: :warning, type: :head, level: 1 }
   ]
 )
 driver.write_artifact(record, name: 'ruby.txt', payload: 'written by Ruby')

@@ -13,7 +13,7 @@ record = %TraceRecord{
 driver = FileDriver.new(path: path)
 
 expected = [
-  %{at: 1_700_000_020, message: "Ruby generated", state: :warning, type: :head, level: 1}
+  %{at: 1_700_000_020.123456, message: "Ruby generated", state: :warning, type: :head, level: 1}
 ]
 
 unless FileDriver.read(driver, record) == expected do

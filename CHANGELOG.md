@@ -3,6 +3,8 @@
 ## 2.0.0-rc.1 — unreleased
 
 - Initial Elixir implementation of Trifle.Traces.
+- Row timestamps preserve fractional Unix seconds for millisecond-level timing,
+  matching Ruby while retaining compatibility with integer-second payloads.
 - Optional `stats_config` enables native activity Stats after successful wrapup
   for live and deferred traces, independently of callbacks. Disabled by default,
   with the same count/state/entry/duration payload as Ruby and Trifle App.

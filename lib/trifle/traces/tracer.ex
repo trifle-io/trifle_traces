@@ -310,5 +310,5 @@ defmodule Trifle.Traces.Tracer do
   defp normalize_mode!("deferred"), do: :deferred
   defp normalize_mode!(mode), do: raise(ArgumentError, "invalid trace mode: #{inspect(mode)}")
 
-  defp now, do: System.system_time(:second)
+  defp now, do: System.system_time(:microsecond) / 1_000_000
 end

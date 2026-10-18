@@ -55,7 +55,7 @@ defmodule Trifle.Traces.DataDriverTest do
 
     entries = [
       %{at: 1_700_000_000, message: "one", state: :success, type: :text, level: 0},
-      %{at: 1_700_000_001, message: "two", state: :error, type: :head, level: 1}
+      %{at: 1_700_000_001.123456, message: "two", state: :error, type: :head, level: 1}
     ]
 
     %{record: record, entries: entries}

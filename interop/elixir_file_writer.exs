@@ -17,8 +17,9 @@ record = %TraceRecord{
 }
 
 driver = FileDriver.new(path: path)
+
 FileDriver.write_part(driver, record, 1, [
-  %{at: 1_700_000_010, message: "Elixir fixture", state: :success, type: :text, level: 0}
+  %{at: 1_700_000_010.654321, message: "Elixir fixture", state: :success, type: :text, level: 0}
 ])
 
 FileDriver.write_artifact(driver, record, "elixir.txt", payload: "written by Elixir")

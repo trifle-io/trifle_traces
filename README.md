@@ -71,6 +71,9 @@ uploads and failed wrapups retain files until then. Use
 Callback-only setups, Null data drivers, and direct driver writes retain sources.
 Cleanup errors are logged; termination before wrapup can leave files behind.
 
+Row `at` timestamps are Unix seconds with a fractional part, preserving subsecond
+precision. Existing integer-second payloads remain readable.
+
 ## Configuration
 
 ```elixir
