@@ -9,6 +9,8 @@ defmodule Trifle.Traces.Phoenix do
 
   use GenServer
 
+  require Logger
+
   alias Trifle.Traces.{Configuration, Context}
 
   @events [
@@ -33,7 +35,23 @@ defmodule Trifle.Traces.Phoenix do
     :ok
   end
 
-  def handle_event([:phoenix, :endpoint, :start], _measurements, metadata, options) do
+  @doc false
+  # Telemetry permanently detaches a handler that raises, which would silence
+  # tracing for the whole node until restart. A failure costs one trace at most.
+  def handle_event(event, measurements, metadata, options) do
+    handle(event, measurements, metadata, options)
+    :ok
+  catch
+    kind, reason ->
+      Logger.warning(
+        "Trifle.Traces Phoenix request trace skipped at #{inspect(event)}: " <>
+          Exception.format_banner(kind, reason, __STACKTRACE__)
+      )
+
+      :ok
+  end
+
+  defp handle([:phoenix, :endpoint, :start], _measurements, metadata, options) do
     conn = metadata.conn
 
     if selected?(conn, options) do
@@ -56,14 +74,14 @@ defmodule Trifle.Traces.Phoenix do
     end
   end
 
-  def handle_event([:phoenix, :endpoint, :stop], measurements, metadata, _options) do
+  defp handle([:phoenix, :endpoint, :stop], measurements, metadata, _options) do
     finish(fn tracer ->
       status = metadata.conn.status || 200
       Trifle.Traces.trace("HTTP #{status}", [tracer: tracer], fn -> measurements end)
     end)
   end
 
-  def handle_event([:phoenix, :endpoint, :exception], _measurements, metadata, _options) do
+  defp handle([:phoenix, :endpoint, :exception], _measurements, metadata, _options) do
     finish(fn tracer ->
       reason = metadata[:reason] || metadata[:error]
       Trifle.Traces.trace("Exception: #{message(reason)}", state: :error, tracer: tracer)

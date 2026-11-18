@@ -17,6 +17,8 @@ defmodule Trifle.Traces.Oban do
 
   use GenServer
 
+  require Logger
+
   alias Trifle.Traces.{Configuration, Context}
 
   @events [[:oban, :job, :start], [:oban, :job, :stop], [:oban, :job, :exception]]
@@ -37,7 +39,23 @@ defmodule Trifle.Traces.Oban do
     :ok
   end
 
-  def handle_event([:oban, :job, :start], _measurements, metadata, options) do
+  @doc false
+  # Telemetry permanently detaches a handler that raises, which would silence
+  # tracing for the whole node until restart. A failure costs one trace at most.
+  def handle_event(event, measurements, metadata, options) do
+    handle(event, measurements, metadata, options)
+    :ok
+  catch
+    kind, reason ->
+      Logger.warning(
+        "Trifle.Traces Oban job trace skipped at #{inspect(event)}: " <>
+          Exception.format_banner(kind, reason, __STACKTRACE__)
+      )
+
+      :ok
+  end
+
+  defp handle([:oban, :job, :start], _measurements, metadata, options) do
     job = metadata.job
 
     if selected?(job, options) do
@@ -61,7 +79,7 @@ defmodule Trifle.Traces.Oban do
     end
   end
 
-  def handle_event([:oban, :job, :stop], measurements, metadata, _options) do
+  defp handle([:oban, :job, :stop], measurements, metadata, _options) do
     finish(fn tracer ->
       Trifle.Traces.trace("Oban job completed", [tracer: tracer], fn ->
         %{measurements: measurements, state: metadata[:state]}
@@ -69,7 +87,7 @@ defmodule Trifle.Traces.Oban do
     end)
   end
 
-  def handle_event([:oban, :job, :exception], _measurements, metadata, _options) do
+  defp handle([:oban, :job, :exception], _measurements, metadata, _options) do
     finish(fn tracer ->
       reason = metadata[:reason] || metadata[:error]
       Trifle.Traces.trace("Exception: #{message(reason)}", state: :error, tracer: tracer)

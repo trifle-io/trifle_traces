@@ -4,7 +4,24 @@ defmodule Trifle.Traces.IntegrationsTest do
   import Plug.Conn
   import Plug.Test
 
+  import ExUnit.CaptureLog
+
   alias Trifle.Traces.Configuration
+
+  defmodule FlakyIndex do
+    @moduledoc false
+    defstruct [:switch]
+
+    def generate_reference(_driver), do: Trifle.Traces.Ref.generate()
+    def capabilities(_driver), do: %{update: true, delete: true, search: false, ttl: :none}
+
+    def create(driver, record) do
+      if Agent.get(driver.switch, & &1) == :fail, do: raise("index unavailable")
+      record.reference
+    end
+
+    def update(_driver, record), do: record.reference
+  end
 
   defp callback_config(parent) do
     Configuration.new(on_wrapup: fn tracer -> send(parent, {:trace, tracer}) end)
@@ -251,17 +268,55 @@ defmodule Trifle.Traces.IntegrationsTest do
     Process.exit(tracer, :kill)
     assert_eventually(fn -> not Process.alive?(tracer) end)
 
-    assert catch_exit(
-             Trifle.Traces.Phoenix.handle_event(
-               [:phoenix, :endpoint, :stop],
-               %{},
-               %{conn: conn},
-               []
-             )
-           )
+    # The failure is logged, not raised: a raising handler is detached by Telemetry.
+    log =
+      capture_log(fn ->
+        assert :ok =
+                 Trifle.Traces.Phoenix.handle_event(
+                   [:phoenix, :endpoint, :stop],
+                   %{},
+                   %{conn: conn},
+                   []
+                 )
+      end)
 
+    assert log =~ "Phoenix request trace skipped"
     assert Trifle.Traces.current_tracer() == previous
     Process.exit(previous, :kill)
+  end
+
+  test "a failed trace write skips that job and leaves the Oban handler attached" do
+    {:ok, switch} = Agent.start_link(fn -> :fail end)
+
+    config =
+      Configuration.new(index_driver: %FlakyIndex{switch: switch})
+
+    id = {__MODULE__, make_ref()}
+    start_supervised!({Trifle.Traces.Oban, config: config, handler_id: id})
+    job = %{id: 20, queue: "default", worker: "MyApp.Worker", attempt: 1, args: %{}}
+
+    attached? = fn ->
+      Enum.any?(:telemetry.list_handlers([:oban, :job, :start]), &(&1.id == id))
+    end
+
+    log =
+      capture_log(fn ->
+        :telemetry.execute([:oban, :job, :start], %{}, %{job: job})
+        assert Trifle.Traces.current_tracer() == nil
+        :telemetry.execute([:oban, :job, :stop], %{}, %{job: job, state: :success})
+      end)
+
+    assert log =~ "Oban job trace skipped"
+    assert log =~ "index unavailable"
+    assert attached?.()
+
+    # Once storage recovers, the next job is traced again.
+    Agent.update(switch, fn _ -> :ok end)
+    :telemetry.execute([:oban, :job, :start], %{}, %{job: job})
+    assert is_pid(Trifle.Traces.current_tracer())
+    :telemetry.execute([:oban, :job, :stop], %{}, %{job: job, state: :success})
+    assert Trifle.Traces.current_tracer() == nil
+    assert attached?.()
   end
 
   defp assert_eventually(fun, attempts \\ 20)
