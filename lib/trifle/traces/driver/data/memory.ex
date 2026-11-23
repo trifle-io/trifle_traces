@@ -53,6 +53,21 @@ defmodule Trifle.Traces.Driver.Data.Memory do
   end
 
   @impl true
+  def artifact_size(driver, record, name) do
+    case read_artifact(driver, record, name) do
+      nil -> nil
+      body -> byte_size(body)
+    end
+  end
+
+  @impl true
+  def read_artifact_range(driver, record, name, first, last) do
+    driver
+    |> read_artifact(record, name)
+    |> Trifle.Traces.Driver.Data.Encoding.slice!(name, first, last)
+  end
+
+  @impl true
   def delete(driver, record) do
     :ets.match_delete(driver.parts, {{record.reference, :_}, :_})
     :ets.match_delete(driver.artifacts, {{record.reference, :_}, :_})

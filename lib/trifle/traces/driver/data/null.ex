@@ -23,5 +23,13 @@ defmodule Trifle.Traces.Driver.Data.Null do
   def read_artifact(_driver, _record, _name), do: nil
 
   @impl true
+  def artifact_size(_driver, _record, _name), do: nil
+
+  @impl true
+  def read_artifact_range(_driver, _record, name, _first, _last) do
+    raise Trifle.Traces.Error, message: "artifact #{inspect(name)} is not stored"
+  end
+
+  @impl true
   def delete(_driver, _record), do: nil
 end

@@ -3,6 +3,13 @@
 ## 2.0.0-rc.1 — unreleased
 
 - Initial Elixir implementation of Trifle.Traces.
+- `Trifle.Traces.artifact_size/3` and `read_artifact_range/5` read an artifact's
+  stored size and a byte range without loading the whole file. File, S3, and
+  Memory drivers implement them natively; other drivers and S3 clients fall
+  back to a whole read.
+- File and S3 drivers accept `max_part_bytes` and `max_part_inflated_bytes` to
+  refuse oversized or over-inflating payload parts. Unlimited by default.
+  Violations raise `Trifle.Traces.Error` with `reason: :too_large`.
 - Row timestamps preserve fractional Unix seconds for millisecond-level timing,
   matching Ruby while retaining compatibility with integer-second payloads.
 - Optional `stats_config` enables native activity Stats after successful wrapup

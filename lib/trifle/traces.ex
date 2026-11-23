@@ -146,6 +146,46 @@ defmodule Trifle.Traces do
     Driver.call(config.data_driver, :read_artifact, [record, name])
   end
 
+  @doc "Stored size of an artifact in bytes, or nil when it does not exist."
+  def artifact_size(record, name, options \\ []) do
+    driver = config_from(options).data_driver
+
+    if ranged?(driver) do
+      Driver.call(driver, :artifact_size, [record, name])
+    else
+      case Driver.call(driver, :read_artifact, [record, name]) do
+        body when is_binary(body) -> byte_size(body)
+        _ -> nil
+      end
+    end
+  end
+
+  @doc """
+  Reads stored bytes `first..last` (inclusive) of an artifact.
+
+  Drivers that implement ranged reads fetch only those bytes; older drivers
+  fall back to reading the whole artifact.
+  """
+  def read_artifact_range(record, name, first, last, options \\ [])
+      when is_integer(first) and is_integer(last) and first >= 0 and last >= first do
+    driver = config_from(options).data_driver
+
+    if ranged?(driver) do
+      Driver.call(driver, :read_artifact_range, [record, name, first, last])
+    else
+      driver
+      |> Driver.call(:read_artifact, [record, name])
+      |> Trifle.Traces.Driver.Data.Encoding.slice!(name, first, last)
+    end
+  end
+
+  defp ranged?(driver) do
+    module = Driver.module(driver)
+
+    Code.ensure_loaded?(module) and function_exported?(module, :artifact_size, 3) and
+      function_exported?(module, :read_artifact_range, 5)
+  end
+
   defp set_state(state, options) do
     if tracer = tracer_from(options), do: Tracer.set_state(tracer, state)
   end

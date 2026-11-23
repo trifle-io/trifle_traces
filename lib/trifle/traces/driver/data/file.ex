@@ -4,10 +4,15 @@ defmodule Trifle.Traces.Driver.Data.File do
 
   alias Trifle.Traces.Driver.Data.Encoding
 
-  defstruct [:path, gzip: false]
+  defstruct [:path, gzip: false, max_part_bytes: nil, max_part_inflated_bytes: nil]
 
   def new(options) do
-    %__MODULE__{path: Keyword.fetch!(options, :path), gzip: Keyword.get(options, :gzip, false)}
+    %__MODULE__{
+      path: Keyword.fetch!(options, :path),
+      gzip: Keyword.get(options, :gzip, false),
+      max_part_bytes: Keyword.get(options, :max_part_bytes),
+      max_part_inflated_bytes: Keyword.get(options, :max_part_inflated_bytes)
+    }
   end
 
   def setup!(options) do
@@ -64,10 +69,12 @@ defmodule Trifle.Traces.Driver.Data.File do
 
   @impl true
   def read_part(driver, record, part) do
-    driver
-    |> file_path(record, Encoding.part_name(part, driver.gzip))
+    path = file_path(driver, record, Encoding.part_name(part, driver.gzip))
+    if driver.max_part_bytes, do: Encoding.check_part_size!(File.stat!(path).size, driver)
+
+    path
     |> File.read!()
-    |> Encoding.unpack_entries(driver.gzip)
+    |> Encoding.unpack_entries(driver.gzip, driver.max_part_inflated_bytes)
   end
 
   @impl true
@@ -80,6 +87,35 @@ defmodule Trifle.Traces.Driver.Data.File do
   @impl true
   def read_artifact(driver, record, name),
     do: File.read!(file_path(driver, record, Path.join("artifacts", name)))
+
+  @impl true
+  def artifact_size(driver, record, name) do
+    case File.stat(file_path(driver, record, Path.join("artifacts", name))) do
+      {:ok, %{type: :regular, size: size}} -> size
+      _ -> nil
+    end
+  end
+
+  @impl true
+  def read_artifact_range(driver, record, name, first, last) do
+    path = file_path(driver, record, Path.join("artifacts", name))
+
+    case :file.open(path, [:read, :raw, :binary]) do
+      {:ok, file} ->
+        try do
+          case :file.pread(file, first, last - first + 1) do
+            {:ok, body} -> Encoding.exact!(body, name, first, last)
+            :eof -> Encoding.exact!("", name, first, last)
+            {:error, reason} -> raise File.Error, reason: reason, action: "read", path: path
+          end
+        after
+          :file.close(file)
+        end
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "open", path: path
+    end
+  end
 
   @impl true
   def delete(driver, record), do: File.rm_rf(trace_dir(driver, record))

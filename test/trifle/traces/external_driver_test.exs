@@ -115,6 +115,24 @@ defmodule Trifle.Traces.ExternalDriverTest do
 
         assert S3.read(driver, record) == entries
         assert S3.read_artifact(driver, record, "report.txt") == "artifact"
+
+        # Ranged reads go through HEAD and Range requests on the real client.
+        assert S3.artifact_size(driver, record, "report.txt") == 8
+        assert S3.artifact_size(driver, record, "missing.txt") == nil
+        assert S3.read_artifact_range(driver, record, "report.txt", 0, 7) == "artifact"
+        assert S3.read_artifact_range(driver, record, "report.txt", 2, 4) == "tif"
+
+        assert_raise Trifle.Traces.Error, fn ->
+          S3.read_artifact_range(driver, record, "report.txt", 4, 20)
+        end
+
+        capped = %{driver | max_part_bytes: 10_000, max_part_inflated_bytes: 10_000}
+        assert S3.read_part(capped, record, 1) == entries
+
+        assert_raise Trifle.Traces.Error, ~r/over the 5 byte limit/, fn ->
+          S3.read_part(%{capped | max_part_bytes: 5}, record, 1)
+        end
+
         S3.delete(driver, record)
 
         root =

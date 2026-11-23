@@ -228,6 +228,26 @@ entries = Trifle.Traces.payload(record)
 binary = Trifle.Traces.read_artifact(record, "report.csv")
 ```
 
+Large artifacts can be read in pieces instead of all at once. Offsets are
+inclusive byte positions of the stored file:
+
+```elixir
+size = Trifle.Traces.artifact_size(record, "video.mp4")
+first_megabyte = Trifle.Traces.read_artifact_range(record, "video.mp4", 0, 1_048_575)
+```
+
+When reading payloads from storage you do not control, cap the size of a part.
+A part over either limit raises `Trifle.Traces.Error` with `reason: :too_large`:
+
+```elixir
+Trifle.Traces.Driver.Data.S3.new(
+  buckets: ["traces"],
+  gzip: true,
+  max_part_bytes: 16 * 1024 * 1024,
+  max_part_inflated_bytes: 64 * 1024 * 1024
+)
+```
+
 ## Web and job integrations
 
 Phoenix endpoint tracing uses Telemetry and sees both successful requests and

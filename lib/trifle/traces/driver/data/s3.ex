@@ -8,7 +8,9 @@ defmodule Trifle.Traces.Driver.Data.S3 do
             client: [],
             buckets: [],
             prefix: "traces",
-            gzip: false
+            gzip: false,
+            max_part_bytes: nil,
+            max_part_inflated_bytes: nil
 
   def new(options) do
     buckets = options |> Keyword.fetch!(:buckets) |> List.wrap()
@@ -19,7 +21,9 @@ defmodule Trifle.Traces.Driver.Data.S3 do
       client: Keyword.get(options, :client, []),
       buckets: buckets,
       prefix: Keyword.get(options, :prefix, "traces"),
-      gzip: Keyword.get(options, :gzip, false)
+      gzip: Keyword.get(options, :gzip, false),
+      max_part_bytes: Keyword.get(options, :max_part_bytes),
+      max_part_inflated_bytes: Keyword.get(options, :max_part_inflated_bytes)
     }
   end
 
@@ -70,12 +74,11 @@ defmodule Trifle.Traces.Driver.Data.S3 do
 
   @impl true
   def read_part(driver, record, part) do
-    driver.adapter.get_object(
-      driver.client,
-      record.bucket_name,
-      object_key(driver, record, Encoding.part_name(part, driver.gzip))
-    )
-    |> Encoding.unpack_entries(driver.gzip)
+    key = object_key(driver, record, Encoding.part_name(part, driver.gzip))
+
+    driver
+    |> part_body(record.bucket_name, key)
+    |> Encoding.unpack_entries(driver.gzip, driver.max_part_inflated_bytes)
   end
 
   @impl true
@@ -95,11 +98,71 @@ defmodule Trifle.Traces.Driver.Data.S3 do
   end
 
   @impl true
+  def artifact_size(driver, record, name) do
+    key = object_key(driver, record, "artifacts/#{name}")
+
+    if ranged?(driver) do
+      driver.adapter.object_size(driver.client, record.bucket_name, key)
+    else
+      case driver.adapter.get_object(driver.client, record.bucket_name, key) do
+        body when is_binary(body) -> byte_size(body)
+        _ -> nil
+      end
+    end
+  end
+
+  @impl true
+  def read_artifact_range(driver, record, name, first, last) do
+    key = object_key(driver, record, "artifacts/#{name}")
+
+    if ranged?(driver) do
+      driver.client
+      |> driver.adapter.get_object_range(record.bucket_name, key, first, last)
+      |> Encoding.exact!(name, first, last)
+    else
+      driver.client
+      |> driver.adapter.get_object(record.bucket_name, key)
+      |> Encoding.slice!(name, first, last)
+    end
+  end
+
+  @impl true
   def delete(driver, record) do
     bucket = record.bucket_name
     prefix = object_key(driver, record, "")
     keys = driver.adapter.list_objects(driver.client, bucket, prefix)
     driver.adapter.delete_objects(driver.client, bucket, keys)
+  end
+
+  defp part_body(%{max_part_bytes: nil} = driver, bucket, key),
+    do: driver.adapter.get_object(driver.client, bucket, key)
+
+  # With a cap, the size is checked before the body is requested, and the body
+  # is then fetched as an exact range so an endpoint cannot send more.
+  defp part_body(driver, bucket, key) do
+    if ranged?(driver) do
+      size = driver.adapter.object_size(driver.client, bucket, key)
+
+      unless is_integer(size) and size > 0,
+        do: raise(Trifle.Traces.Error, message: "S3 object #{inspect(key)} is missing or empty")
+
+      Encoding.check_part_size!(size, driver)
+
+      driver.client
+      |> driver.adapter.get_object_range(bucket, key, 0, size - 1)
+      |> Encoding.exact!(key, 0, size - 1)
+    else
+      body = driver.adapter.get_object(driver.client, bucket, key)
+      Encoding.check_part_size!(byte_size(body), driver)
+      body
+    end
+  end
+
+  # Adapters written before ranged reads only implement get_object/3.
+  defp ranged?(driver) do
+    Code.ensure_loaded?(driver.adapter) and
+      function_exported?(driver.adapter, :object_size, 3) and
+      function_exported?(driver.adapter, :get_object_range, 5)
   end
 
   defp object_key(driver, record, name) do
